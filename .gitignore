@@ -1,0 +1,14 @@
+.DS_Store
+
+# Credentials / Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# AI API keys / config
+.anthropic
+.openai
