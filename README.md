@@ -2,20 +2,25 @@
 tags: Claude Code, CLAUDE.md, AI, LLM, コンテキストウィンドウ
 -->
 
-# Claude Code のドキュメントを読んで気になったことを検証してみた
+# (小ネタ) Claude Code のドキュメントを読んで気になったことを検証してみた
 
 ## はじめに
 
-Claude Code の公式ドキュメントは結構頻繁に更新されているかなと思います。改めて読み直してみて、ドキュメントに書いてあることは分かるのですが、「実際にはどのように動作するのだろう」と疑問に思ったことがいくつかありました。
+[Claude Code の公式ドキュメント](https://code.claude.com/docs/ja/) は結構頻繁に更新されているかなと思います。改めて読み直してみて、ドキュメントに書いてあることは分かるのですが「実際にはどのように動作するのだろう」と疑問に思ったことがいくつかありました。
 
-それぞれのトピックを立てて、解説・検証した結果をお伝えしていきます。
+それぞれのトピックを立てて、解説・検証した結果を記述しています。
 
 なお、検証項目は公式ドキュメントを読んでいて「本当かな?」と思ったものだけをチョイスしているので、体系的な網羅性や一貫性はありません。あらかじめご了承ください。
 
+:::note info
+この記事の内容は本人が考えて決めてますが、文章は AI (Claude Code) が 100% 書いています。
+:::
+
 ### 検証環境
 
-- Claude Code（Opus 4.6、1M context）
-- `/context` コマンドで Memory files のトークン数を確認
+- macOS（Apple Silicon）
+- Claude Code v2.1.96（Opus 4.6、1M context）
+- ターミナル: [Warp](https://www.warp.dev/) v0.2026.04.01
 
 ## 検証結果一覧
 
@@ -43,7 +48,7 @@ Memory files: 779 tokens (0.1%)
 
 **import_test.md は起動時にまるごと展開され、コンテキストに読み込まれています。** CLAUDE.md に直接書いた場合と同じだけトークンを消費します。
 
-実は同じドキュメント内に、以下のように明記されています。
+また同じドキュメント内に、以下のようにも記述されています。
 
 > インポートされたファイルは展開され、それらを参照する CLAUDE.md と一緒に**起動時にコンテキストに読み込まれます。**
 
@@ -341,7 +346,7 @@ gitGraph
 
 `--resume` や `--continue` はファイル末尾の最新メッセージから `parentUuid` チェーンを辿って会話を復元するようです。そのため、**最後に書き込みを終えた方のチェーンだけが表示**されます。
 
-これを確認するため、セッション A を後に終わらせる実験も行いました。結果、`--resume` でも `--continue` でもセッション A が表示されました。**後から書き込みを終えた方が優先される**ことが確定しました。
+これを確認するため、セッション A を後に終わらせる実験も行いました。結果、`--resume` でも `--continue` でもセッション A が表示されました。**後から書き込みを終えた方が優先される**ようです。
 
 #### まとめ
 
@@ -349,8 +354,52 @@ gitGraph
 
 実運用では、**同じディレクトリで同時に `--continue` するのは避けるべき**です。片方の会話履歴が UI 上で見えなかったり、意図した通りに動作しない可能性があります。
 
+### 検証 7: Plan Mode の Ctrl+G でプランファイルが開けない（Warp）
+
+[公式ドキュメント](https://code.claude.com/docs/ja/common-workflows#plan-mode-%E3%82%92%E4%BD%BF%E7%94%A8%E3%81%97%E3%81%A6%E5%AE%89%E5%85%A8%E3%81%AA%E3%82%B3%E3%83%BC%E3%83%89%E5%88%86%E6%9E%90%E3%82%92%E8%A1%8C%E3%81%86)には、Plan Mode について以下の記述があります。
+
+> `Ctrl+G` を押してデフォルトのテキストエディタで計画を開き、Claude が進める前に直接編集できます。
+
+しかし、ターミナルに Warp を使用している場合、Ctrl+G を押しても何も起きませんでした。
+
+#### 原因調査
+
+macOS 標準ターミナルで同じ操作を試したところ、Ctrl+G でプランファイルが正常に開けました。Warp 固有の問題であることが確定したため、Warp のキーボードショートカット設定（Cmd+/）を調査しました。
+
+Ctrl+G には以下の 3 つの Warp アクションが割り当てられていました。
+
+| Warp アクション名 | YAML キー名 | 原因 |
+|---------|---------|:---:|
+| Add Selection for Next Occurrence | `editor_view:add_next_occurrence` | No |
+| Go to Line | `editor_view:go_to_line` | No |
+| Open CLI Agent Rich Input | `terminal:open_cli_agent_rich_input` | **Yes** |
+
+1 つずつ無効化して検証した結果、**`terminal:open_cli_agent_rich_input`（Warp の AI Agent 入力）が Ctrl+G を横取りしていた**ことが原因でした。
+
+#### 解決方法
+
+`~/.warp/keybindings.yaml` に以下を追加します。
+
+```yaml
+"terminal:open_cli_agent_rich_input": none
+```
+
+これにより Warp が Ctrl+G を処理しなくなり、Claude Code の Plan Mode で Ctrl+G が正常に動作するようになりました。
+
+#### 補足
+
+Warp の設定画面からショートカットを削除すると、正しい YAML キー名で `keybindings.yaml` に書き込まれます。YAML キー名が分からない場合は、設定画面から操作するのが確実です。
+
+また、`$EDITOR` 環境変数が設定されていないと Ctrl+G は動作しません。`~/.zshrc` などに以下を追加しておく必要があります。
+
+```bash
+export EDITOR="code --wait"
+```
+
 ## 参考
 
 - [Claude があなたのプロジェクトを記憶する方法（日本語版）](https://code.claude.com/docs/ja/memory)
 - [一般的なワークフロー（日本語版）](https://code.claude.com/docs/ja/common-workflows)
 - [Claude Code の仕組み（日本語版）](https://code.claude.com/docs/ja/how-claude-code-works)
+- [キーボードショートカットをカスタマイズする（日本語版）](https://code.claude.com/docs/ja/keybindings)
+- [Warp Keyboard shortcuts](https://docs.warp.dev/getting-started/keyboard-shortcuts)
