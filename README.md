@@ -479,7 +479,25 @@ disable-model-invocation: true
 
 ただし、system-reminder はあくまで LLM へのヒント（「このエージェントを呼び出してください」という指示）であり、**強制実行ではありません**。自然言語の指示で打ち消すことができます。
 
-### 検証 9: フックで echo したら画面に表示されるか
+### 検証 9: Warp Terminal で Agent Teams の Shift+Down が効かない
+
+[Agent Teams](https://code.claude.com/docs/ja/agent-teams) の In-process モードでは、Shift+Down でチームメンバーをサイクル（巡回）できます。最後のメンバーの後はリーダーに戻り、一方向にループします（Shift+Up は不要）。
+
+しかし、[Warp Terminal](https://www.warp.dev/) を使用している場合、Shift+Down は Warp の「ブロック選択を下に拡張」機能（`terminal:expand_block_selection_below`）に割り当てられており、Claude Code に渡りません。
+
+これは[検証 7](#検証-7-planモードへの切り替え-ctrlg-が-warp-で動作しない) の Ctrl+G と同じ問題です。
+
+#### 解決方法
+
+Warp の Settings → Keyboard shortcuts から `terminal:expand_block_selection_below` を解除します。`~/.warp/keybindings.yaml` に以下が追記されます。
+
+```yaml:~/.warp/keybindings.yaml
+"terminal:expand_block_selection_below": none
+```
+
+解除後、Shift+Down で Agent Teams のチームメンバーをサイクルできるようになりました。
+
+### 検証 10: フックで echo したら画面に表示されるか
 
 フックのコマンドで `echo` を使えば画面に表示されそうだと直感的に思いますが、実際にはそうではありません。
 
@@ -561,3 +579,4 @@ stdout はユーザー画面に表示するためのものではなく、Claude 
 - [Warp Keyboard shortcuts](https://docs.warp.dev/getting-started/keyboard-shortcuts)
 - [Hooks リファレンス（日本語版）](https://code.claude.com/docs/ja/hooks)
 - [カスタムサブエージェントの作成（日本語版）](https://code.claude.com/docs/ja/sub-agents)
+- [エージェントチーム（日本語版）](https://code.claude.com/docs/ja/agent-teams)
