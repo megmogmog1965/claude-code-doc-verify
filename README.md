@@ -1045,6 +1045,109 @@ stdout はユーザー画面に表示するためのものではなく、Claude 
 | SubagentStart | 表示されない |
 | SubagentStop | 表示されない |
 
+### 検証 16: `/compact` 後にフックで再注入した内容はどこまでコンテキストに載るか
+
+[公式ドキュメント（Hooks ガイド）](https://code.claude.com/docs/ja/hooks-guide#%E5%9C%A7%E7%B8%AE%E5%BE%8C%E3%81%AB%E3%82%B3%E3%83%B3%E3%83%86%E3%82%AD%E3%82%B9%E3%83%88%E3%82%92%E5%86%8D%E6%B3%A8%E5%85%A5%E3%81%99%E3%82%8B)には、`SessionStart` フックで `matcher: "compact"` を指定すると、`/compact` 後にコマンドの stdout を Claude のコンテキストに追加できると書かれています。
+
+ドキュメントの例は以下のように短い固定文字列を流し込むだけのものです。
+
+```json
+{
+  "type": "command",
+  "command": "echo 'Reminder: use Bun, not npm. Run bun test before committing. Current sprint: auth refactor.'"
+}
+```
+
+「`echo` を `git log --oneline -5` などに置き換えて動的出力を表示できます」とも書かれていますが、いずれも短いテキストを想定しています。一方で実務では「圧縮で失いたくない情報」がまとまった量のファイルに詰まっていることがあり、そのまま流し込みたくなります。ファイルを直接展開した場合に何が起きるかは公式には明記されていないため、ここで挙動を確認します。
+
+#### セットアップ A: README.md 全文を注入する（約 30KB）
+
+`jq -Rs` で `README.md` 全文を JSON 文字列にエスケープし、`additionalContext` にそのまま流し込みます。
+
+```json:.claude/settings.json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -Rs '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:.}}' \"$CLAUDE_PROJECT_DIR/README.md\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### 結果 A
+
+`/compact` 直後の新セッションで Claude が受け取ったメッセージストリームには、以下のようなブロックが挿入されていました（一部抜粋）。
+
+```
+<system-reminder>
+SessionStart hook additional context: <persisted-output>
+Output too large (30.6KB). Full output saved to: /Users/{username}/.claude/projects/.../hook-....txt
+
+Preview (first 2KB):
+<!--
+tags: Claude Code, CLAUDE.md, AI, LLM, コンテキストウィンドウ
+-->
+
+# (小ネタ) Claude Code のドキュメントを読んで気になったことを検証してみた
+...
+</persisted-output>
+</system-reminder>
+```
+
+注入された文字列は外側が `<system-reminder>`、内側が `<persisted-output>` という二段構造で包まれています。[公式ドキュメントの「制限」セクション](https://code.claude.com/docs/ja/hooks-guide#%E5%88%B6%E9%99%90)にも、hook の `additionalContext` はシステムリマインダー（`<system-reminder>`）として注入される旨が記載されています。さらに今回は本文が大きすぎたため、ハーネスが内側を `<persisted-output>` で包み直してプレビューと退避先ファイルパスに置き換えていました。
+
+**`additionalContext` の実体は 30.6KB あるのに、コンテキストに直接載ったのは先頭 2KB のプレビューだけ**です。残りは一時ファイルに退避され、Claude がそのパスを `Read` しに行かないと読めません。大きなファイルを雑に流し込む方針は、プレビューの範囲に落ちなかった内容については「ないのと同じ」になります。
+
+#### セットアップ B: 「README.md を読み直してください」という指示だけ注入する
+
+ファイル本体を渡す代わりに、指示テキストだけを注入します。`jq -n` で null 入力から JSON を組み立てるとエスケープ事故が起きません。
+
+```json:.claude/settings.json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:\"このセッションで最初のユーザー発言に応答する前に、必ず Read ツールで README.md を読み直してください。README.md はこのプロジェクトの成果物であり、文脈把握に必須です。\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### 結果 B（挙動の整理）
+
+指示だけなら数百バイトなので切り詰めは発生せず、`additionalContext` は素直にコンテキストに載ります。ただし重要な前提として、**`additionalContext` の注入は "コンテキストに文字列を置く" だけで、Claude がその瞬間に何か行動するわけではありません**。Claude はユーザー発言に応答するエージェントなので、実際に `README.md` が読まれるのは「ユーザーの最初の発言に応答する過程」でのことです。
+
+つまり A と B は、同じ hook 機構でも性質が異なります。
+
+| 方式 | 注入サイズ | コンテキスト消費 | README の内容が Claude に届くか |
+|------|----------|---------------|-----------|
+| A: 全文を `additionalContext` に展開 | 30.6KB（実体） | 先頭 2KB のプレビューのみ | 先頭 2KB 分は即時、残りは `Read` しない限り届かない |
+| B: 「読み直して」という指示だけ注入 | 数百バイト | そのまま全量 | ユーザーの最初の発言がトリガーになったタイミングで `Read` される |
+
+#### まとめ
+
+- `SessionStart` + `matcher: "compact"` + `additionalContext` の組み合わせは、`/compact` 後にコンテキストを補充するための正攻法です
+- ただし `additionalContext` に載せた文字列が大きすぎると、ハーネスが切り詰めて「プレビュー＋退避ファイル」の形に変換します（今回は 2KB が閾値でした）
+- 切り詰めを避けたいなら、**ファイル本体ではなく「このファイルを読んでください」という指示**を注入するのが扱いやすい
+- 指示を注入する方式は「即時読み込み」ではなく「次のユーザー発言で初めて読まれる」点に注意。無関係な質問から始まった場合、優先順位次第では読まれない可能性もあります
+
+公式の例が短い固定文字列で済ませているのは、おそらくこの切り詰め挙動と折り合いをつけた結果です。再注入したい情報が膨らみやすいファイル（README.md などの成果物ファイル）に入っている場合は、内容を直接流し込むのではなく「このファイルを読んでください」という指示注入に寄せた方が安全です。
+
 ## 参考
 
 - [Claude があなたのプロジェクトを記憶する方法（日本語版）](https://code.claude.com/docs/ja/memory)
@@ -1055,5 +1158,6 @@ stdout はユーザー画面に表示するためのものではなく、Claude 
 - [LSP の設定](https://code.claude.com/docs/ja/lsp)
 - [スキル（日本語版）](https://code.claude.com/docs/ja/skills)
 - [Hooks リファレンス（日本語版）](https://code.claude.com/docs/ja/hooks)
+- [Hooks ガイド（日本語版）](https://code.claude.com/docs/ja/hooks-guide)
 - [カスタムサブエージェントの作成（日本語版）](https://code.claude.com/docs/ja/sub-agents)
 - [エージェントチーム（日本語版）](https://code.claude.com/docs/ja/agent-teams)

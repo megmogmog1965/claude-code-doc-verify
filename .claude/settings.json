@@ -10,6 +10,17 @@
     ]
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:\"このセッションで最初のユーザー発言に応答する前に、必ず Read ツールで README.md を読み直してください。README.md はこのプロジェクトの成果物であり、文脈把握に必須です。\"}}'"
+          }
+        ]
+      }
+    ],
     "SubagentStart": [
       {
         "matcher": "",
@@ -21,7 +32,7 @@
         ]
       }
     ],
-"PreToolUse": [
+    "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
