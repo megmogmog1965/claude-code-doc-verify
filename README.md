@@ -792,7 +792,7 @@ SKILL.md からのファイル参照は **すべて AI 駆動** です。CLAUDE.
 **プラグインの構成:**
 
 ```
-files/11/skill-ref-test-plugin/
+files/12/skill-ref-test-plugin/
 ├── .claude-plugin/
 │   └── plugin.json
 └── skills/
@@ -802,7 +802,7 @@ files/11/skill-ref-test-plugin/
 ```
 
 ```bash
-claude --plugin-dir ./files/11/skill-ref-test-plugin
+claude --plugin-dir ./files/12/skill-ref-test-plugin
 ```
 
 プラグインのスキルはネームスペース付きで `/skill-ref-test-plugin:plugin-ref-test` として呼び出します。
@@ -820,7 +820,7 @@ claude --plugin-dir ./files/11/skill-ref-test-plugin
 **証跡: ハーネスが展開したプラグイン版 SKILL.md の全文**
 
 ```markdown
-Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/files/11/skill-ref-test-plugin/skills/plugin-ref-test
+Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/files/12/skill-ref-test-plugin/skills/plugin-ref-test
 
 # プラグイン版ファイル参照テスト
 
@@ -835,9 +835,9 @@ Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/file
 
 @ref-data.md
 
-## 方式 C: /Users/{username}/src/claude-code-doc-verify/files/11/skill-ref-test-plugin/skills/plugin-ref-test 変数
+## 方式 C: /Users/{username}/src/claude-code-doc-verify/files/12/skill-ref-test-plugin/skills/plugin-ref-test 変数
 
-参照先: /Users/{username}/src/claude-code-doc-verify/files/11/skill-ref-test-plugin/skills/plugin-ref-test/ref-data.md
+参照先: /Users/{username}/src/claude-code-doc-verify/files/12/skill-ref-test-plugin/skills/plugin-ref-test/ref-data.md
 
 ## 実行指示
 
