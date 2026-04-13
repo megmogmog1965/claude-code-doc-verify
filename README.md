@@ -850,7 +850,50 @@ Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/file
 
 プラグイン版スキルでも、プロジェクト版スキル（検証 11）とファイル参照の挙動は完全に同一です。SKILL.md からのファイル自動ロードはどちらの配置方法でも行われず、`${CLAUDE_SKILL_DIR}` の変数展開のみがハーネスレベルで処理されます。
 
-### 検証 13: フックで echo したら画面に表示されるか
+### 検証 13: SKILL.md の `argument-hint` は AI のコンテキストに含まれるか
+
+スキルのフロントマターには `argument-hint` というフィールドがあります。[公式ドキュメント](https://code.claude.com/docs/ja/skills#%E3%83%95%E3%83%AD%E3%83%B3%E3%83%88%E3%83%9E%E3%82%BF%E3%83%BC%E3%83%AA%E3%83%95%E3%82%A1%E3%83%AC%E3%83%B3%E3%82%B9)では「オートコンプリート時に期待される引数のヒントを表示する」と説明されていますが、AI の挙動にも影響するのでしょうか？
+
+#### セットアップ
+
+既存のスキル `file-ref-test` のフロントマターに `argument-hint` を追加し、`/context` コマンドでトークン数の変化を観察しました。
+
+**変更前:**
+
+```yaml
+---
+name: file-ref-test
+description: SKILL.md からのファイル参照方式を検証するテストスキル
+---
+```
+
+**変更後:**
+
+```yaml
+---
+name: file-ref-test
+description: SKILL.md からのファイル参照方式を検証するテストスキル
+argument-hint: [test-argument]
+---
+```
+
+#### 結果
+
+| 項目 | `argument-hint` 追加前 | 追加後 |
+|------|:---:|:---:|
+| `file-ref-test` のトークン数 | 11 tokens | **11 tokens（変化なし）** |
+
+さらに、AI に渡されるスキル一覧を確認したところ、`name` と `description` のみが含まれており、`argument-hint` の値は含まれていませんでした。
+
+```
+- file-ref-test: SKILL.md からのファイル参照方式を検証するテストスキル
+```
+
+#### まとめ
+
+**`argument-hint` は純粋にユーザー向けの UI 機能であり、AI のコンテキストには一切含まれません。** AI がスキルを認識する際に参照するのは `name` と `description` のみです。
+
+### 検証 14: フックで echo したら画面に表示されるか
 
 フックのコマンドで `echo` を使えば画面に表示されそうだと直感的に思いますが、実際にはそうではありません。
 
