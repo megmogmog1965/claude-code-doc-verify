@@ -893,7 +893,86 @@ argument-hint: [test-argument]
 
 **`argument-hint` は純粋にユーザー向けの UI 機能であり、AI のコンテキストには一切含まれません。** AI がスキルを認識する際に参照するのは `name` と `description` のみです。
 
-### 検証 14: フックで echo したら画面に表示されるか
+### 検証 14: SKILL.md の動的コンテキスト注入は本当にコマンド出力に置換されるか
+
+[公式ドキュメント](https://code.claude.com/docs/ja/skills#動的コンテキストを注入する)には、SKILL.md 本文に `` !`command` `` 構文を書くと、スキル呼び出し時にハーネスがコマンドを実行し、出力を本文に注入した上で Claude に渡す、という記述があります。実際に置換が走るのか、マークダウン構造に依存するのかを検証しました。
+
+#### セットアップ
+
+テスト用スキル `.claude/skills/dynamic-context-test/SKILL.md` を作成します。
+
+```markdown
+---
+name: dynamic-context-test
+description: SKILL.md の動的コンテキスト注入（!`command` 構文）が機能するかを検証するテストスキル
+allowed-tools: Bash(date), Bash(whoami), Bash(echo *)
+disable-model-invocation: true
+---
+
+# 動的コンテキスト注入テスト
+
+## 注入ポイント A（見出しレベル）
+
+- 現在日時: !`date`
+- 実行ユーザー: !`whoami`
+- 固定マーカー: !`echo UNIQUE_MARKER_DYNAMIC_CONTEXT_77777`
+
+## 注入ポイント B（説明文中に混在）
+
+以下は散文テキスト中に !`echo MARKER_IN_PROSE` が埋め込まれているケースです。ハーネスがマークダウン構造を無視して置換するかを確認します。
+
+## 実行指示
+
+あなたが受け取った **このスキル本文（「# 動的コンテキスト注入テスト」以降の全文）をそのままコードブロックで引用してください**。
+
+解釈・要約・判断は不要です。置換の有無はユーザーが SKILL.md の原本と照合して判定します。
+```
+
+**検証方針の補足**: 置換はハーネスが Claude に送信する前に行われるため、Claude は原本の `` !`command` `` 表記を見る手段がありません。そのため Claude には「判断」を求めず、「受け取った本文をそのまま引用する」ことのみを指示し、ユーザーが原本と照合します。
+
+#### 結果
+
+`/dynamic-context-test` を実行したところ、Claude が受け取った本文は以下のようになっていました。
+
+```markdown
+Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/.claude/skills/dynamic-context-test
+
+# 動的コンテキスト注入テスト
+
+## 注入ポイント A（見出しレベル）
+
+- 現在日時: Mon Apr 13 12:27:46 JST 2026
+- 実行ユーザー: {username}
+- 固定マーカー: UNIQUE_MARKER_DYNAMIC_CONTEXT_77777
+
+## 注入ポイント B（説明文中に混在）
+
+以下は散文テキスト中に MARKER_IN_PROSE が埋め込まれているケースです。ハーネスがマークダウン構造を無視して置換するかを確認します。
+
+## 実行指示
+
+あなたが受け取った **このスキル本文（「# 動的コンテキスト注入テスト」以降の全文）をそのままコードブロックで引用してください**。
+
+解釈・要約・判断は不要です。置換の有無はユーザーが SKILL.md の原本と照合して判定します。
+```
+
+| 位置 | 原本の記述 | Claude が受け取った内容 |
+|------|------|------|
+| 見出し配下の箇条書き | `` !`date` `` | `Mon Apr 13 12:27:46 JST 2026` |
+| 同上 | `` !`whoami` `` | `{username}` |
+| 同上 | `` !`echo UNIQUE_MARKER_...` `` | `UNIQUE_MARKER_DYNAMIC_CONTEXT_77777` |
+| 散文テキスト中 | `` !`echo MARKER_IN_PROSE` `` | `MARKER_IN_PROSE` |
+
+#### まとめ
+
+- `` !`command` `` 構文はドキュメント通り、Claude に到達する前にコマンド出力へ置換されます
+- 置換はマークダウン構造に依存せず、**SKILL.md 本文全域**で実行されます（見出し配下の箇条書きでも、段落中の散文でも同様）
+- ハーネスが付与する `Base directory for this skill: ...` ヘッダは動的コンテキスト注入後の本文の前に追加されます
+- コマンド実行には `allowed-tools` の許可が必要です（今回の例では `Bash(date), Bash(whoami), Bash(echo *)`）
+
+動的コンテキスト注入は、PR 情報やビルド状態など**実行時にしか確定しない情報**をスキルのプロンプトに取り込むのに便利です。一方で SKILL.md 全域で走るため、`` !`...` `` パターンを含む任意の文字列をそのまま残したいケースでは扱いに注意が必要です。
+
+### 検証 15: フックで echo したら画面に表示されるか
 
 フックのコマンドで `echo` を使えば画面に表示されそうだと直感的に思いますが、実際にはそうではありません。
 
