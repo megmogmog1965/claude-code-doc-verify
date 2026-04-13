@@ -1,0 +1,8 @@
+{
+  "name": "skill-ref-test-plugin",
+  "description": "SKILL.md からのファイル参照を検証するテストプラグイン",
+  "version": "1.0.0",
+  "author": {
+    "name": "test"
+  }
+}
