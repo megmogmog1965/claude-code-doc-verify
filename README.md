@@ -497,7 +497,171 @@ Warp の Settings → Keyboard shortcuts から `terminal:expand_block_selection
 
 解除後、Shift+Down で Agent Teams のチームメンバーをサイクルできるようになりました。
 
-### 検証 10: フックで echo したら画面に表示されるか
+### 検証 10: TypeScript LSP プラグインは何をしているのか
+
+[公式ドキュメント](https://code.claude.com/docs/ja/discover-plugins#%E3%82%B3%E3%83%BC%E3%83%89-%E3%82%A4%E3%83%B3%E3%83%86%E3%83%AA%E3%82%B8%E3%82%A7%E3%83%B3%E3%82%B9)には、LSP（Language Server Protocol）プラグインを導入すると Claude Code にコードインテリジェンス機能が追加されると書かれています。
+
+> TypeScript/JavaScript language server for Claude Code, providing code intelligence features like go-to-definition, find references, and error checking.
+
+しかし、プラグインをインストールしても **Claude Code の画面上には何も変化がありません**。LSP は裏で何をしていて、どこで使われ、何の効用があるのでしょうか。
+
+#### セットアップ
+
+`/plugins` コマンドから `typescript-lsp` プラグインを有効化し、README に記載されている通り `typescript-language-server` をグローバルインストールしました。
+
+```bash
+npm install -g typescript-language-server typescript
+```
+
+有効化後の `~/.claude/settings.json` には以下が追記されます。
+
+```json:~/.claude/settings.json（抜粋）
+{
+  "enabledPlugins": {
+    "typescript-lsp@claude-plugins-official": true
+  }
+}
+```
+
+#### LSP が追加するもの: LSP ツール
+
+LSP プラグインが有効になると、Claude の利用可能なツールに **LSP ツール** が追加されます。このツールは以下の操作をサポートしています。
+
+| 操作 | 説明 |
+|------|------|
+| `hover` | シンボルの型情報やドキュメントを取得 |
+| `goToDefinition` | シンボルの定義元にジャンプ |
+| `findReferences` | シンボルの全参照箇所を検索 |
+| `documentSymbol` | ファイル内の全シンボル（関数・クラス・変数等）を一覧 |
+| `workspaceSymbol` | ワークスペース全体でシンボルを検索 |
+| `goToImplementation` | インターフェースの実装を検索 |
+| `prepareCallHierarchy` | コール階層の取得 |
+| `incomingCalls` | その関数を呼び出している箇所 |
+| `outgoingCalls` | その関数が呼び出している関数 |
+
+Claude は従来 Grep や Read で「テキストとして」コードを検索していましたが、LSP ツールにより**意味を理解した上で**コードをナビゲートできるようになります。
+
+#### 実際の動作検証
+
+以下の TypeScript ファイルを用意しました。
+
+```typescript:files/10/sample.ts
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+function greetUser(user: User): string {
+  return `Hello, ${user.name}!`;
+}
+
+const alice: User = { id: 1, name: "Alice", email: "alice@example.com" };
+const message = greetUser(alice);
+console.log(message);
+```
+
+**hover（型情報の取得）**:
+
+`greetUser` 関数（7 行目）にカーソルを合わせると、型シグネチャが返ります。
+
+```
+LSP hover at 7:10 → function greetUser(user: User): string
+```
+
+`message` 変数（12 行目）は明示的に型を書いていませんが、推論結果が返ります。
+
+```
+LSP hover at 12:7 → const message: string
+```
+
+Read ツールではファイルの内容がそのまま返るだけで、型推論の結果は得られません。
+
+**goToDefinition（定義元ジャンプ）**:
+
+関数シグネチャ内の `User`（7 行目）から定義元を辿ると、1 行目の `interface User` が返ります。
+
+```
+LSP goToDefinition at 7:28 → files/10/sample.ts:1:11
+```
+
+**findReferences（参照検索）**:
+
+`User` インターフェース（1 行目）の全参照箇所を検索すると、正確に 3 箇所が返ります。
+
+```
+LSP findReferences at 1:11 → 3 references:
+  Line 1:11   (定義)
+  Line 7:26   (関数の引数の型)
+  Line 11:14  (変数の型アノテーション)
+```
+
+ここで重要なのは、同じ検索を Grep で行った場合との違いです。
+
+```
+Grep "User" → 4 行がヒット:
+  Line 1:  interface User {
+  Line 7:  function greetUser(user: User): string {
+  Line 11: const alice: User = { ...
+  Line 12: const message = greetUser(alice);
+```
+
+Grep は「User」というテキストを含む全行を返すため、`greetUser` という関数名や `user` という変数名もヒットします。一方、LSP の `findReferences` は `User` **インターフェースの参照だけ**を正確に返します。
+
+**documentSymbol（シンボル一覧）**:
+
+ファイル内の構造を意味的に解析し、シンボルとその種類を返します。
+
+```
+LSP documentSymbol:
+  User (Interface) - Line 1
+    id (Property) - Line 2
+    name (Property) - Line 3
+    email (Property) - Line 4
+  greetUser (Function) - Line 7
+  alice (Constant) - Line 11
+  message (Constant) - Line 12
+```
+
+インターフェースのプロパティが入れ子で表現されるなど、コードの構造が意味的にパースされています。
+
+#### Claude はいつ LSP を使うのか
+
+LSP ツールは Claude が**自律的に判断して**使います。ユーザーが明示的に「LSP を使え」と指示する必要はありません。たとえば以下のような場面で、Claude は Grep/Read の代わりに（または併用して）LSP ツールを選択します。
+
+- 「この関数の定義元を探して」→ `goToDefinition`
+- 「この型を使っている箇所を全部見つけて」→ `findReferences`
+- 「このファイルの構造を教えて」→ `documentSymbol`
+- リファクタリング時に影響範囲を調べる → `findReferences` + `incomingCalls`
+
+画面上では、Claude が LSP ツールを呼び出すと以下のように表示されます。
+
+```
+⏺ LSP(operation: "findReferences", filePath: "src/index.ts", line: 5, character: 10)
+  ⎿  Found 3 references across 1 files: ...
+```
+
+Read や Grep と同じように、ツール呼び出しとして表示されます。プラグイン導入前はこのツール自体が存在しないため、Claude はテキストベースの検索しかできません。
+
+#### LSP と Grep/Read の使い分け
+
+| 観点 | LSP | Grep / Read |
+|------|-----|-------------|
+| 検索の精度 | **意味ベース**（型・スコープを理解） | テキストベース（文字列一致） |
+| 型情報 | 推論結果を含めて取得可能 | 取得不可 |
+| セットアップ | プラグイン + 言語サーバーのインストールが必要 | 不要（組み込み） |
+| 対応言語 | プラグインが提供する言語のみ | 全ファイル |
+| 処理速度 | 言語サーバーの起動が必要（初回はやや遅い） | 即座に実行可能 |
+
+LSP はより正確なコード理解を提供しますが、Grep/Read が不要になるわけではありません。LSP は対応言語のソースコードに限られますが、Grep はどんなテキストファイルでも検索できます。
+
+#### まとめ
+
+TypeScript LSP プラグインは、Claude Code に **「コードの意味を理解する目」** を与えるものです。導入しても画面上に目立つ変化はありませんが、Claude が利用できるツールが増え、テキスト検索では得られない型情報・定義ジャンプ・正確な参照検索が可能になります。
+
+特に大規模な TypeScript プロジェクトでは、同名の変数や関数が多数存在するため、Grep では精度が落ちるケースがあります。LSP を導入しておくと、Claude がリファクタリングや影響範囲の調査をより正確に行えるようになります。
+
+### 検証 11: フックで echo したら画面に表示されるか
 
 フックのコマンドで `echo` を使えば画面に表示されそうだと直感的に思いますが、実際にはそうではありません。
 
@@ -577,6 +741,7 @@ stdout はユーザー画面に表示するためのものではなく、Claude 
 - [Claude Code の仕組み（日本語版）](https://code.claude.com/docs/ja/how-claude-code-works)
 - [キーボードショートカットをカスタマイズする（日本語版）](https://code.claude.com/docs/ja/keybindings)
 - [Warp Keyboard shortcuts](https://docs.warp.dev/getting-started/keyboard-shortcuts)
+- [LSP の設定](https://code.claude.com/docs/ja/lsp)
 - [Hooks リファレンス（日本語版）](https://code.claude.com/docs/ja/hooks)
 - [カスタムサブエージェントの作成（日本語版）](https://code.claude.com/docs/ja/sub-agents)
 - [エージェントチーム（日本語版）](https://code.claude.com/docs/ja/agent-teams)
