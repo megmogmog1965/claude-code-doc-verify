@@ -941,7 +941,7 @@ Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/.cla
 
 ## 注入ポイント A（見出しレベル）
 
-- 現在日時: Mon Apr 13 12:27:46 JST 2026
+- 現在日時: Mon Apr 11 14:00:00 JST 2026
 - 実行ユーザー: {username}
 - 固定マーカー: UNIQUE_MARKER_DYNAMIC_CONTEXT_77777
 
@@ -958,7 +958,7 @@ Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/.cla
 
 | 位置 | 原本の記述 | Claude が受け取った内容 |
 |------|------|------|
-| 見出し配下の箇条書き | `` !`date` `` | `Mon Apr 13 12:27:46 JST 2026` |
+| 見出し配下の箇条書き | `` !`date` `` | `Mon Apr 11 15:00:00 JST 2026` |
 | 同上 | `` !`whoami` `` | `{username}` |
 | 同上 | `` !`echo UNIQUE_MARKER_...` `` | `UNIQUE_MARKER_DYNAMIC_CONTEXT_77777` |
 | 散文テキスト中 | `` !`echo MARKER_IN_PROSE` `` | `MARKER_IN_PROSE` |
