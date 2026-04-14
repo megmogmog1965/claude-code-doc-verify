@@ -570,36 +570,104 @@ duration_ms: 12524</usage>
 
 #### トピック 11: `/skill-name` 起動
 
-発言欄で `/skill-name` を打つことでスキルを起動するケースです。ここでは観察用に用意した `do-nothing-1` スキル（「指定した文字列をそのまま表示するだけ」のシンプルなスキル）を使って検証しました。
+発言欄で `/skill-name` を打つことでスキルを起動するケースです。ハーネスは SKILL.md を読み取り、`<command-*>` メタタグの付与、ベースディレクトリの明示、環境変数の展開、動的コンテキストの注入など、複数の加工を行ったうえで LLM に渡します。ここでは `dynamic-context-test` スキルを使って、これらの加工処理をまとめて観察しました。
+
+**SKILL.md の原文（ハーネス加工前）:**
+
+````
+---
+name: dynamic-context-test
+description: SKILL.md の動的コンテキスト注入（!`command` 構文）が機能するかを検証するテストスキル
+allowed-tools: Bash(date), Bash(whoami), Bash(echo *)
+disable-model-invocation: true
+---
+
+# 動的コンテキスト注入テスト
+
+## 注入ポイント A（見出しレベル）
+
+- 現在日時: !`date`
+- 実行ユーザー: !`whoami`
+
+## 注入ポイント B（環境変数展開）
+
+- スキルディレクトリ: ${CLAUDE_SKILL_DIR}
+- セッション ID: ${CLAUDE_SESSION_ID}
+
+## 注入ポイント C（説明文中に混在）
+
+以下は散文テキスト中に !`echo MARKER_IN_PROSE` が埋め込まれているケースです。ハーネスがマークダウン構造を無視して置換するかを確認します。
+
+## 実行指示
+
+あなたが受け取った **このスキル本文（「# 動的コンテキスト注入テスト」以降の全文）をそのままコードブロックで引用してください**。
+
+解釈・要約・判断は不要です。置換の有無はユーザーが SKILL.md の原本と照合して判定します。
+````
 
 **ターミナル上の入力表示:**
 
 ```
-/do-nothing-1
+/dynamic-context-test
 ```
 
 **LLM に届いた原文（ユーザー発言ブロック）:**
 
-```
-<command-message>do-nothing-1</command-message>
-<command-name>/do-nothing-1</command-name>
-Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/.claude/skills/do-nothing-1
+````
+<command-message>dynamic-context-test</command-message>
+<command-name>/dynamic-context-test</command-name>
+Base directory for this skill: /Users/{username}/src/claude-code-doc-verify/.claude/skills/dynamic-context-test
 
-# 何もしないスキル1
+# 動的コンテキスト注入テスト
 
-以下のメッセージをそのまま表示してください。
+## 注入ポイント A（見出しレベル）
 
-(……スキル本文が続く……)
-```
+- 現在日時: Tue Apr 14 10:45:14 JST 2026
+- 実行ユーザー: {username}
 
-構造を分解します:
+## 注入ポイント B（環境変数展開）
 
-- **`<command-message>do-nothing-1</command-message>`**: 起動されたコマンド名（短縮形、`/` なし）。
-- **`<command-name>/do-nothing-1</command-name>`**: フルなコマンド名（`/` 付き）。
-- **`Base directory for this skill: <path>`**: スキルのベースディレクトリを明示する 1 行。スキル内で相対パス参照を行う場合の基準位置になります。
-- **スキル本文**: `SKILL.md` の frontmatter を除いた本文がそのまま展開されます。
+- スキルディレクトリ: /Users/{username}/src/claude-code-doc-verify/.claude/skills/dynamic-context-test
+- セッション ID: {session-id}
 
-ユーザーが打ったのは `/do-nothing-1` の 1 行だけですが、LLM に届くのはこの 4 要素セット全体です。つまり `/skill-name` 起動は、ハーネスが SKILL.md を読み取り、上記の構造でユーザー発言ブロックを丸ごと再構築してから LLM に渡す仕組みになっています。
+## 注入ポイント C（説明文中に混在）
+
+以下は散文テキスト中に MARKER_IN_PROSE が埋め込まれているケースです。ハーネスがマークダウン構造を無視して置換するかを確認します。
+
+## 実行指示
+
+あなたが受け取った **このスキル本文（「# 動的コンテキスト注入テスト」以降の全文）をそのままコードブロックで引用してください**。
+
+解釈・要約・判断は不要です。置換の有無はユーザーが SKILL.md の原本と照合して判定します。
+````
+
+原文と LLM 受け取り内容を見比べると、ハーネスが行った加工がわかります:
+
+| 加工 | 原文 | LLM に届いた結果 |
+|------|------|-----------------|
+| `<command-*>` メタタグ付与 | （なし） | `<command-message>` `<command-name>` が先頭に挿入 |
+| ベースディレクトリ挿入 | （なし） | `Base directory for this skill: <絶対パス>` が本文の前に挿入 |
+| frontmatter 除去 | `name:` `description:` `allowed-tools:` 等 | 除去（LLM には届かない） |
+| `` !`date` `` | `` !`date` `` | `Tue Apr 14 10:45:14 JST 2026` |
+| `` !`whoami` `` | `` !`whoami` `` | `{username}` |
+| `${CLAUDE_SKILL_DIR}` | `${CLAUDE_SKILL_DIR}` | `/Users/{username}/.../dynamic-context-test` |
+| `${CLAUDE_SESSION_ID}` | `${CLAUDE_SESSION_ID}` | `{session-id}`（セッション UUID） |
+| 散文中の `` !`echo ...` `` | `` !`echo MARKER_IN_PROSE` `` | `MARKER_IN_PROSE` |
+
+ポイント:
+
+- **`` !`command` `` 動的コンテキスト注入**: SKILL.md 全域（見出し・箇条書き・散文すべて）で走る。LLM は展開後のコマンド出力しか見えず、原本の `` !`command` `` 構文は到達しない。
+- **`${...}` 変数展開**: [公式ドキュメント](https://code.claude.com/docs/en/skills#available-string-substitutions)によると、利用できる文字列置換変数は以下の通り:
+
+  | 変数 | 内容 |
+  |------|------|
+  | `$ARGUMENTS` | スキル呼び出し時に渡された引数全体 |
+  | `$ARGUMENTS[N]` / `$N` | N 番目の引数（0 始まり） |
+  | `${CLAUDE_SKILL_DIR}` | SKILL.md が置かれたディレクトリの絶対パス |
+  | `${CLAUDE_SESSION_ID}` | 現在のセッション ID |
+
+- **frontmatter は LLM に届かない**: `name`, `description`, `allowed-tools`, `disable-model-invocation` などはハーネスが消費し、本文だけが LLM に渡る。
+- **いずれの展開も LLM には結果しか届かない**: LLM は `${CLAUDE_SKILL_DIR}` や `` !`command` `` という構文を見ることはなく、展開済みの文字列だけを受け取る。
 
 なお、`/skill-name` 起動時にはもう 1 つ別の `<system-reminder>` も注入されるケースが観察されました（利用可能な skill の一覧を知らせるもの）。ただしこれはスキル起動のコア構造とは独立した挙動なので、トピック 16 の `<system-reminder>` バリエーション集でまとめて扱います。
 

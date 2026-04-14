@@ -13,7 +13,12 @@ disable-model-invocation: true
 - 実行ユーザー: !`whoami`
 - 固定マーカー: !`echo UNIQUE_MARKER_DYNAMIC_CONTEXT_77777`
 
-## 注入ポイント B（説明文中に混在）
+## 注入ポイント B（環境変数展開）
+
+- スキルディレクトリ: ${CLAUDE_SKILL_DIR}
+- セッション ID: ${CLAUDE_SESSION_ID}
+
+## 注入ポイント C（説明文中に混在）
 
 以下は散文テキスト中に !`echo MARKER_IN_PROSE` が埋め込まれているケースです。ハーネスがマークダウン構造を無視して置換するかを確認します。
 
