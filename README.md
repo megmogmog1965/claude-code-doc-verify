@@ -305,7 +305,7 @@ sequenceDiagram
 
 **セッションファイルを直接確認**: セッションファイル（JSONL）を調べると、両方のデータが時系列で混在して保存されていました。以下は実際の JSONL から抜粋したデータです（関係ないフィールドは省略）。
 
-```jsonl:~/.claude/projects/<project>/<session-id>.jsonl
+```jsonl:~/.claude/projects/{project}/{session-id}.jsonl
 {"uuid":"26163b14...","parentUuid":"a754eec6...","timestamp":"11:44:18","message":"セッションA: 1回目"}
 {"uuid":"b759fb1e...","parentUuid":"46cc3a00...","timestamp":"11:44:24","message":"セッションA: 2回目"}
 {"uuid":"11ad510f...","parentUuid":"19860c17...","timestamp":"11:44:27","message":"セッションB: 1回目"}
@@ -1011,7 +1011,7 @@ stdout はユーザー画面に表示するためのものではなく、Claude 
 
 実際のデバッグログには以下のように記録されていました:
 
-```log:~/.claude/debug/<session-id>.txt
+```log:~/.claude/debug/{session-id}.txt
 2026-04-11T01:04:12.609Z [DEBUG] Hooks: Parsed initial response: {"systemMessage":"Bash ツールが呼び出されました"}
 2026-04-11T01:04:12.610Z [DEBUG] Successfully parsed and validated hook JSON output
 2026-04-11T01:04:12.610Z [DEBUG] Hook PreToolUse:Bash (PreToolUse) success:
