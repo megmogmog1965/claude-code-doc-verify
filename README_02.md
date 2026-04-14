@@ -34,25 +34,25 @@ Claude Code の公式ドキュメント（[How Claude Code works](https://code.c
 
 ```mermaid
 flowchart LR
-    P["Your prompt"] --> G["Gather context"]
+    P["プロンプト入力"] --> G["コンテキスト収集"]
 
-    subgraph LOOP["agentic loop"]
+    subgraph LOOP["エージェントループ"]
         direction LR
-        G --> A["Take action"]
-        A --> V["Verify results"]
-        V -.->|repeat| G
+        G --> A["アクション実行"]
+        A --> V["結果を検証"]
+        V -.->|繰り返し| G
     end
 
-    V --> D["Done"]
+    V --> D["完了"]
 
-    U["You:\ninterrupt, steer,\nor add context"] -.-> LOOP
+    U["ユーザー:\n割り込み・方向修正\nコンテキスト追加"] -.-> LOOP
 ```
 
 | フェーズ | やること |
 |---------|---------|
-| **Gather context** | ファイル検索・読み取り・コードベース理解など、情報収集 |
-| **Take action** | ファイル編集・コマンド実行・コード生成など、実際の作業 |
-| **Verify results** | テスト実行・出力確認・エラーチェックなど、結果の検証 |
+| **コンテキスト収集** | ファイル検索・読み取り・コードベース理解など、情報収集 |
+| **アクション実行** | ファイル編集・コマンド実行・コード生成など、実際の作業 |
+| **結果を検証** | テスト実行・出力確認・エラーチェックなど、結果の検証 |
 
 3 つのフェーズは厳密に分かれているわけではなく、タスクに応じて流動的に遷移します。質問だけならコンテキスト収集だけで完了しますし、バグ修正なら 3 フェーズを何周もします。ユーザーはいつでも割り込んで方向修正ができます。
 
