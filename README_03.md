@@ -402,24 +402,82 @@ gitGraph
 
 ### `/clear`: セッションログを完全に破棄する
 
-`/clear` は、画面の会話ログ表示と API コンテキストの Messages を**完全にリセット**します。`/compact` とは違い、要約すら残りません。セッションログ（JSONL ファイル）は追記専用なので、過去エントリはファイル上に残ったままです。
+`/clear` は、画面の会話ログ表示と API コンテキストの Messages を**完全にリセット**します。`/compact` とは違い、要約すら残りません。
 
-`/clear` がセッションログ（JSONL ファイル）にどう記録されるか、詳細な挙動は別途検証が必要です（本記事のスコープ外）。
+JSONL ファイルに対する挙動は `/compact` と大きく異なります。`/compact` が同じファイルに `compact_boundary` と `isCompactSummary` を追記していたのに対し、**`/clear` は既存ファイルには一切手を加えず、新しい JSONL ファイル（＝新しいセッション）を作成**します。
+
+実際に `/clear` を実行して挙動を観察した例：
+
+```
+実行前のセッション（55 エントリ）:
+  /Users/{username}/.claude/projects/{project}/a180b663-...jsonl
+    last timestamp: 2026-04-15T11:10:50.200Z   ← このファイルは以降一切書き換わらない
+
+/clear 実行
+
+実行後の新セッション（/clear 直後は 4 エントリ）:
+  /Users/{username}/.claude/projects/{project}/a4c4eae8-...jsonl   ← 新ファイル
+```
+
+新セッションファイルの先頭は以下のような構造になっています。
+
+```json
+// line 2: 新セッションのルートエントリ（自動注入されるメタ情報）
+{
+  "parentUuid": null,
+  "type": "user",
+  "message": { "role": "user", "content": "<local-command-caveat>..." },
+  "isMeta": true,
+  "uuid": "72423dc7-161a-4562-9d69-0fb1e8af2011"
+}
+
+// line 3: /clear コマンド自体の記録
+{
+  "parentUuid": "72423dc7-161a-4562-9d69-0fb1e8af2011",
+  "type": "user",
+  "message": { "role": "user", "content": "<command-name>/clear</command-name>..." },
+  "uuid": "0a5aec8e-4b08-4eaf-a08e-ee7bfe4f8725"
+}
+```
+
+ポイント:
+
+- 新ファイルには `compact_boundary` のような専用の境界エントリは存在しません。代わりに、**新しい `sessionId` を持つファイルそのもの**が境界の役割を果たします。
+- 新ファイル内の最初のエントリは `parentUuid: null`（新ツリーのルート）で、これに `/clear` コマンドエントリがぶら下がります。以降の会話はこの新ルートから連なります。
+- 旧ファイル（`a180b663...`）は一切書き換わらず、`claude --resume a180b663...` で明示的に指定すれば復元できます。`/clear` は「過去を消す」のではなく、「新しいセッションに切り替える」動作です。
 
 ### 2 つの違い
 
 | 観点 | `/compact` | `/clear` |
 |------|-----------|---------|
 | API コンテキスト Messages | 要約に置き換わる（縮小） | 空になる（リセット） |
-| 過去の会話の記憶 | 要約形式で保持 | 失われる |
+| 過去の会話の記憶 | 要約形式で保持 | 破棄（ただし旧 JSONL ファイルは残る） |
 | 画面の会話ログ表示 | リセット | リセット |
-| セッションログ（JSONL ファイル） | `compact_boundary` + `isCompactSummary` が追記 | 追記される（詳細は要検証） |
+| JSONL ファイル | 同一ファイルに `compact_boundary` + `isCompactSummary` を追記 | 新ファイルを作成（旧ファイルは手つかず） |
+| セッション ID | 変わらない | 新しい ID に切り替わる |
 
 ---
 
 ## `--continue` / `--resume` による復元
 
-`--continue` や `--resume` で Claude Code を再起動すると、API コンテキストが再構築されます。ただし**全要素がセッションログ（JSONL ファイル）から復元されるわけではなく、カテゴリごとに挙動が異なります**。
+`--continue` や `--resume` で Claude Code を再起動すると、API コンテキストが再構築されます。前章 [/compact: セッションログを要約で置き換える](#compact-セッションログを要約で置き換える) で見たとおり、Messages はセッションログ末尾から `parentUuid` を逆方向に辿って復元されるため、**最新の `compact_boundary` 以降のエントリだけが復元対象**になります。
+
+```mermaid
+%%{init: {'gitGraph': {'mainBranchName': '圧縮前ツリー'}} }%%
+gitGraph
+    commit id: "会話エントリ N-2"
+    commit id: "会話エントリ N-1"
+    commit id: "会話エントリ N"
+    branch "圧縮後ツリー"
+    commit id: "compact_boundary" type: HIGHLIGHT
+    commit id: "isCompactSummary" type: HIGHLIGHT
+    commit id: "会話エントリ #1"
+    commit id: "会話エントリ #2"
+```
+
+`--continue` はセッションログ末尾（上図では `会話エントリ #2`）から `parentUuid` を逆方向に辿るため、**圧縮後ツリー**のみが到達可能です。圧縮前ツリー側は JSONL ファイルには残っていますが、`compact_boundary` の `parentUuid` が `null` で接続が切れているため、復元経路上たどり着けません。
+
+ただし再構築されるのは Messages だけではなく、他のカテゴリは**セッションログに依存せず現在のディスク状態から再初期化**されます。
 
 ### カテゴリ別の復元挙動
 
@@ -429,45 +487,22 @@ gitGraph
 | Tool 定義 | 現在のツールセットを再ロード | 前回以降に追加/削除されたツールは変化する |
 | Memory files | 現在のディスク内容を再ロード | `CLAUDE.md` が書き換わっていれば新しい内容が入る |
 | Skills | 現在のディスクから再スキャン | 新しく追加された Skill は一覧に出る |
-| Messages | **セッションログから復元** | ただし「最新の compact summary 以降」のみ（後述） |
-| 動的注入（揮発性 reminder 等） | 初期化される | 前セッションの volatile な reminder は消える |
+| Messages | セッションログから復元 | 最新の `compact_boundary` 以降のみ（前章参照） |
 
-つまり `--continue` で復元されるのは「**前回と等価なコンテキスト**」であって、**バイト単位で同一ではない**という点に注意が必要です。Messages 部分だけがセッションログ由来で、それ以外は**現在のディスク状態**から再初期化されます。
+つまり `--continue` で復元されるのは「**前回と等価なコンテキスト**」であって、**バイト単位で同一ではない**点に注意が必要です。Messages 部分だけがセッションログ由来で、それ以外は**現在のディスク状態**から再初期化されます。
 
-### Messages の復元範囲: 「最新の compact summary 以降」のみ
+### 測定による裏付け
 
-Messages はセッションログ（JSONL ファイル）の**全履歴を復元するわけではありません**。`/compact` を実行したセッションでは、**最新の compact summary 以降のエントリのみ**が復元されます。
-
-筆者のセッションで実測した例：
+Messages の復元範囲が「最新の `compact_boundary` 以降のみ」であることは、復元前後のトークン数から定量的に確認できます。
 
 ```
-セッションログ総エントリ数:        13,041 件
-isCompactSummary エントリ数:     13 件（過去の /compact 実行ごとに追加されている）
-最新の compact summary の位置:   line 12,671
-それ以降のエントリ数:            376 件
-/compact 前のコンテキストサイズ:   363,115 tokens（compact_boundary の preTokens）
---continue 直後の Messages:      66.5k tokens
+セッションログ総エントリ数:           13,041 件
+最新の compact_boundary の位置:      line 12,671
+/compact 直前のコンテキストサイズ:    363,115 tokens（compact_boundary の preTokens）
+--continue 直後の Messages:         66.5k tokens
 ```
 
-もし `--continue` がセッションログの全エントリ（13,041 件）を復元していれば、Messages サイズは数百 k tokens に到達するはずです。しかし実測では 66.5k tokens に収まっていました。
-
-**`preTokens: 363,115` → 復元後 Messages: 66.5k tokens** という数値の差が、compact summary 以降のみが復元されている証拠になります。
-
-### 復元範囲の図
-
-```
-セッションログ（JSONL ファイル）:
-  line 0     : （古いエントリ）         ← 復元されない
-  line 1     : ...
-  :
-  line 12670 : compact_boundary        ← 復元されない（メタ情報のみ）
-  line 12671 : isCompactSummary=true   ← ★ここから復元
-  line 12672 : （圧縮後の最初の発言）     ← 復元される
-  :
-  line 13040 : （最新のエントリ）         ← 復元される
-```
-
-セッションログ（JSONL ファイル）は追記専用なので過去の圧縮前エントリもすべて残っていますが、コンテキスト復元時にはそれらは参照されず、**最新の圧縮済み状態**から再開することになります。これは `/compact` を実行した意味を `--continue` 後にも保つための自然な挙動です。
+もし `--continue` がセッションログの全エントリ（13,041 件）を復元していれば、Messages サイズは `preTokens: 363,115` を大きく超える数百 k tokens に到達するはずです。しかし実測では 66.5k tokens に収まりました。**復元対象が圧縮後ツリー（`compact_boundary` 以降）に限定されている**ことを裏付ける値です。
 
 ---
 
