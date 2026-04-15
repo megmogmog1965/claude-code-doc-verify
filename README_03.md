@@ -2,7 +2,7 @@
 tags: Claude Code, AI, LLM, トークン消費, コンテキストウィンドウ
 -->
 
-# Claude Code のトークン消費量はコンテキストサイズに比例する——セッションログで証明する
+# Claude Code のコンテキストサイズとトークン消費量について
 
 ## はじめに
 
@@ -506,6 +506,17 @@ Messages の復元範囲が「最新の `compact_boundary` 以降のみ」であ
 
 ---
 
-## 検証: コンテキストサイズがトークン消費を左右する
+## 検証: コンテキストサイズが本当に上限消費を左右するのか
 
-（ここから本題の実験データを記録していきます）
+論点: 次のうち、どのtoken消費区分が、 `/status --> Usage --> Current session (x% used)` に影響しているのか明らかにしたい。
+
+- input_tokens
+- cache_creation_input_tokens
+- cache_read_input_tokens
+- output_tokens
+
+仮説:
+
+1. 全ての送信したコンテキストが (x% used) にカウントされている
+2. cache_read_input_tokens は (x% used) にはカウントされていない。API利用の場合と同様に
+3. cache_read_input_tokens は (x% used) にはカウントされているが、1.0 未満の係数がかけられている
