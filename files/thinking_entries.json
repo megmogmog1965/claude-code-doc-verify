@@ -1,0 +1,137 @@
+[
+  {
+    "_line": 7,
+    "requestId": "req_011Ca5fLwXupnZAzJVrsbPBF",
+    "timestamp": "2026-04-15T13:48:21.360Z",
+    "message": {
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "(空文字列)",
+          "signature": "EvUBCmwIDBgCKkBfwfX8YW0w0iAFapdtkBybvvch...(省略)"
+        }
+      ],
+      "stop_reason": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 9673,
+        "cache_read_input_tokens": 16302,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 9673
+        },
+        "output_tokens": 8,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  },
+  {
+    "_line": 25,
+    "requestId": "req_011Ca5fR1eKnwFBxH3CLaTce",
+    "timestamp": "2026-04-15T13:49:44.110Z",
+    "message": {
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "(空文字列)",
+          "signature": "EoE9CmwIDBgCKkAlg7mlBHG93Zn7txEosZ2tBJRr...(省略)"
+        }
+      ],
+      "stop_reason": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 459,
+        "cache_read_input_tokens": 40217,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 459
+        },
+        "output_tokens": 8,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  },
+  {
+    "_line": 31,
+    "requestId": "req_011Ca5fcKCpCqUips5whVkzu",
+    "timestamp": "2026-04-15T13:51:51.598Z",
+    "message": {
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "(空文字列)",
+          "signature": "Eq8DCmwIDBgCKkDgzVeshgGsq2bmMPzif8EbB1is...(省略)"
+        }
+      ],
+      "stop_reason": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 3166,
+        "cache_read_input_tokens": 40676,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 3166
+        },
+        "output_tokens": 8,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  },
+  {
+    "_line": 36,
+    "requestId": "req_011Ca5fcoxCb3347dcCi62EV",
+    "timestamp": "2026-04-15T13:52:14.884Z",
+    "message": {
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "(空文字列)",
+          "signature": "ErofCmwIDBgCKkAISjv/dwqwEpe5+UtvDvOKo2rH...(省略)"
+        }
+      ],
+      "stop_reason": null,
+      "usage": {
+        "input_tokens": 1,
+        "cache_creation_input_tokens": 1403,
+        "cache_read_input_tokens": 43842,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 1403
+        },
+        "output_tokens": 65,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  },
+  {
+    "_line": 44,
+    "requestId": "req_011Ca5ftBJ1JDZQaHV4zzeyW",
+    "timestamp": "2026-04-15T13:56:41.114Z",
+    "message": {
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "(空文字列)",
+          "signature": "EqKEAQpsCAwYAipAcc3HJ16324+xVaJHQnCaHHsv...(省略)"
+        }
+      ],
+      "stop_reason": null,
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 2128,
+        "cache_read_input_tokens": 45245,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 2128
+        },
+        "output_tokens": 8,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      }
+    }
+  }
+]

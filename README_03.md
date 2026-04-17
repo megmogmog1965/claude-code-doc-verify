@@ -594,23 +594,29 @@ gitGraph
 
 セッション JSONL（`~/.claude/projects/<project>/<session-id>.jsonl`）からトークン消費量を集計する際、以下の 2 点に注意が必要です。
 
-#### 1. `output_tokens` はストリーミングチャンクの累積値
+#### 1. `output_tokens` は最終チャンクのみ完全な値を持つ
 
-同一 `requestId` のエントリが複数記録されますが、これらは**同一 API 呼び出しのストリーミングチャンク**です。各チャンクの `output_tokens` は増分ではなく**累積値**であるため、`requestId` ごとに **`MAX` を取る**のが正しい集計方法です。`SUM` を取ると約 1.8 倍の過大計上になります。
+同一 `requestId` のエントリが複数記録されますが、これらは**同一 API 呼び出しのストリーミングチャンク**です。実データを調べたところ、途中チャンク（`stop_reason=null`）の `output_tokens` は**全て同一の値で固定**されており、**最終チャンク（`stop_reason` が `tool_use` や `end_turn`）のみが完全な出力トークン数を持つ**ことが分かりました。
 
 ```
-同一 requestId のエントリ例:
-  output_tokens: [8, 8, 8, ..., 8, 1469]
-                  ~~~~~~~~~~~~~~~~~~~~~~  ~~~~
-                  ストリーミング途中の     最終値（これが正しい値）
-                  スナップショット
+同一 requestId のエントリ例（11 エントリ）:
+  line 1019: thinking  stop=null     out=8     ← thinking の出力トークン数
+  line 1020: text      stop=null     out=8     ← 同じ値で固定
+  line 1021: tool_use  stop=null     out=8     ←   〃
+      :         :         :            :
+  line 1037: tool_use  stop=null     out=8     ←   〃
+  line 1039: tool_use  stop=tool_use out=1469  ← 最終チャンクのみ完全な値
 ```
 
-一方、`input_tokens`・`cache_creation_input_tokens`・`cache_read_input_tokens` は同一 `requestId` 内で**常に同一値**なので、どのエントリから取っても結果は変わりません。
+途中チャンクの値は thinking ブロックの出力トークン数と一致しています（thinking ブロックを含む 275 件中 275 件で一致）。**段階的に増加する累積値ではない**点に注意してください。
+
+このため、`requestId` ごとに **`MAX` を取る**のが正しい集計方法です。`SUM` を取ると約 1.6 倍の過大計上になります。
+
+なお、`input_tokens`・`cache_read_input_tokens` は同一 `requestId` 内で常に同一値でした。`cache_creation_input_tokens` は 792 件中 1 件だけ途中チャンクで `0`・最終チャンクのみ正しい値を持つケースがあったため、全フィールド `MAX` で集計するのが安全です。
 
 #### 2. サブエージェント JSONL との重複
 
-`<session-id>/subagents/*.jsonl` に記録されるサブエージェントのエントリは、メインの `<session-id>.jsonl` にも**同一 `requestId` で重複記録**されています。`requestId` ベースの重複排除を行えば自然に解消されますが、ファイル単位で単純合算すると二重計上になります。
+`<session-id>/subagents/*.jsonl` に記録されるサブエージェントのエントリは、**大部分が**メインの `<session-id>.jsonl` にも同一 `requestId` で重複記録されています。ただし、**メインに記録されない `requestId` も存在する**ため（本セッションでは 768 件中 79 件）、サブエージェント JSONL も読み込む必要があります。`requestId` ベースの重複排除を行えば、両方読み込んでも二重計上にはなりません。
 
 #### 正しい集計スクリプト（抜粋）
 
@@ -619,16 +625,17 @@ rid_data = {}
 for entry in all_jsonl_entries:
     rid = entry["requestId"]
     usage = entry["message"]["usage"]
-    out = usage["output_tokens"]
+    vals = {
+        "input": usage["input_tokens"],
+        "cache_creation": usage["cache_creation_input_tokens"],
+        "cache_read": usage["cache_read_input_tokens"],
+        "output": usage["output_tokens"],
+    }
     if rid not in rid_data:
-        rid_data[rid] = {
-            "input": usage["input_tokens"],
-            "cache_creation": usage["cache_creation_input_tokens"],
-            "cache_read": usage["cache_read_input_tokens"],
-            "output": out,  # 初回
-        }
+        rid_data[rid] = vals
     else:
-        rid_data[rid]["output"] = max(rid_data[rid]["output"], out)  # MAX で更新
+        for k in rid_data[rid]:
+            rid_data[rid][k] = max(rid_data[rid][k], vals[k])  # 全フィールド MAX
 ```
 
 ### 計測結果（第 2 回）
@@ -724,16 +731,17 @@ for f in files:
             if ts < window_start or ts >= window_end: continue
             rid = entry.get('requestId', '')
             if not rid: continue
-            out = usage.get('output_tokens', 0)
+            vals = {
+                'input': usage.get('input_tokens', 0),
+                'cache_creation': usage.get('cache_creation_input_tokens', 0),
+                'cache_read': usage.get('cache_read_input_tokens', 0),
+                'output': usage.get('output_tokens', 0),
+            }
             if rid not in rid_data:
-                rid_data[rid] = {
-                    'input': usage.get('input_tokens', 0),
-                    'cache_creation': usage.get('cache_creation_input_tokens', 0),
-                    'cache_read': usage.get('cache_read_input_tokens', 0),
-                    'output': out,
-                }
+                rid_data[rid] = vals
             else:
-                rid_data[rid]['output'] = max(rid_data[rid]['output'], out)
+                for k in rid_data[rid]:
+                    rid_data[rid][k] = max(rid_data[rid][k], vals[k])  # 全フィールド MAX
 
 api_calls = len(rid_data)
 totals = {'input': 0, 'cache_creation': 0, 'cache_read': 0, 'output': 0}
@@ -893,3 +901,266 @@ output 優位にするには cache_read を抑える必要がある。`/compact`
 :::note warn
 S45→S46 で `cache_creation` が急増（169,821 → 344,793、Δ=174,972）し、S46→S47 で usage が 28%→34% と 6 ポイント跳ね上がっています。これは **auto-compact の発動** が原因と推測されます。auto-compact はコンテキストを圧縮して再構築するため、それまで cache_read（低コスト）として送られていたコンテキストの大部分が cache_creation（高コスト）として再送信されたと考えられます。
 :::
+
+### 回帰分析（47 ポイント統合）
+
+#### 手法
+
+前回（25 ポイント）と同じモデル `usage(%) = r2 × cc + r3 × cr + r4 × out`（切片なし）を使用します。第 2 回（S1〜S10）・第 3 回（S11〜S25）・第 4 回（S26〜S47）はそれぞれ異なるウィンドウですが、各ウィンドウ内の累積値に対して同じ係数が成り立つため、47 ポイントを統合して回帰できます。
+
+OLS の係数がすべて正のため、NNLS と結果は一致しました。
+
+#### 結果
+
+```
+a(cc)  = 1.311e-07
+a(cr)  = 1.006e-08
+a(out) = 1.742e-06
+R²     = 0.9983
+max|resid| = 2.9%
+```
+
+cc : cr : out の比率（cc = 1 に正規化）:
+
+| | cc | cr | out |
+|--|---:|---:|----:|
+| **測定値（47 点統合）** | **1.0** | **0.077** | **13.3** |
+| 測定値（25 点統合、前回） | 1.0 | 0.060 | 7.8 |
+| API 価格（Opus 4.6） | 1.0 | 0.080 | 4.0 |
+
+#### auto-compact 影響ポイント（S46〜S47）の扱い
+
+S46〜S47 を除外した 45 ポイントでも分析を行いましたが、結果はほぼ同一でした。
+
+| | 45 点（S46-S47 除外） | 47 点（全データ） |
+|--|---:|---:|
+| cc : cr : out | 1.0 : 0.076 : 13.3 | 1.0 : 0.077 : 13.3 |
+| R² | 0.9987 | 0.9983 |
+| max\|resid\| | 2.9% | 2.9% |
+
+45 点モデルで S46・S47 を予測すると残差は −2.9%・+1.8% で、他のポイントと同程度です。auto-compact の影響は `cache_creation` の急増として正しくモデルに取り込まれており、**S46〜S47 を外れ値として除外する必要はない**と判断しました。以降の分析は 47 点統合の結果を採用します。
+
+#### 25 ポイント → 47 ポイントで変わったこと
+
+1. **cr/cc が API 価格にほぼ一致**: 0.060 → 0.077（API 価格 0.080 の 96%）。第 4 回で cache_read の追加データが入り、推定が安定しました
+2. **out/cc が大幅に上昇**: 7.8 → 13.3（API 価格 4.0 の 3.3 倍）。第 4 回の output 優位データにより、output の寄与が cache_creation よりも遥かに大きいことが明確になりました
+3. **R² は維持**: 0.9976 → 0.9983。データ追加で精度は維持されています
+
+#### 考察
+
+出力トークン（output）は、cache_creation の **13.3 倍**のコストで usage に計上されています。API 価格比（4.0 倍）と比較すると約 3.3 倍の乖離があり、**出力トークンは API 価格比以上に利用上限を消費する**ことが分かりました。
+
+一方、cache_read は cache_creation の **0.077 倍**で、API 価格比（0.080 倍）とほぼ一致しています。つまり **cache_read の usage 計上は API 価格比とほぼ同じ割引率**で行われていると言えます。
+
+これらの結果から、Claude Code の usage(%) を効率的に使うためには:
+
+- **出力トークンの抑制が最も効果的**: 不要な長文生成を避け、簡潔な応答を求めることが usage 節約に直結します
+- **コンテキスト（cache_read）は比較的低コスト**: 大きなコンテキストを維持しても、cache_read としてヒットする限り usage への影響は小さいです
+- **auto-compact に注意**: auto-compact が発動すると、cache_read だった部分が cache_creation として再送信され、usage が急増します（S45→S47 で 6 ポイント急騰）
+
+---
+
+## 付録: 計測データの収集方法
+
+本検証で使用したトークン消費量データの収集方法を、検証可能な形で記述します。
+
+### 2 種類のデータソース
+
+計測テーブルの各行（S1〜S47）は、以下の 2 つのデータソースから構成されています。
+
+| データ | 取得方法 | 性質 |
+|--------|---------|------|
+| `/status` 列（usage %） | Claude Code の `/status` コマンドを手動実行し、`Current session (x% used)` の整数値を目視で読み取り | Anthropic サーバー側が算出した値。整数表示のため ±0.5% の丸め誤差あり |
+| `API 呼出`・`input`・`cache_creation`・`cache_read`・`output` 列 | セッション JSONL ファイルを Python スクリプトで集計 | クライアント側（Claude Code プロセス）が記録した値 |
+
+つまり、**`/status` の usage(%) はサーバーが報告した「正解値」であり、JSONL から集計した 4 種のトークン数はクライアントが記録した「説明変数」**です。回帰分析はこの 2 つの独立したソースを突き合わせて行っています。
+
+### 集計対象となる JSONL エントリの実例
+
+以下は、計測セッション（`4e68c636-...`）から抜粋した `type: "assistant"` エントリの実物です（整形済み）。集計スクリプトはこの形式のエントリを処理しています。
+
+```json
+{
+  "parentUuid": "43b619da-8229-4e1b-bf9d-cdd59649e128",
+  "isSidechain": false,
+  "message": {
+    "model": "claude-opus-4-6",
+    "id": "msg_0192r3jFnYdaTgTdZ9vPxdGd",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01JE3B7YAFvSh6Wm21BVF3YT",
+        "name": "Read",
+        "input": {
+          "file_path": "/Users/yuusuke-kawatsu/src/claude-code-doc-verify/README_03.md"
+        }
+      }
+    ],
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 6,
+      "cache_creation_input_tokens": 9673,
+      "cache_read_input_tokens": 16302,
+      "output_tokens": 129,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 9673,
+        "ephemeral_5m_input_tokens": 0
+      }
+    }
+  },
+  "requestId": "req_011Ca5fLwXupnZAzJVrsbPBF",
+  "type": "assistant",
+  "uuid": "303624fb-f4ce-47f9-8116-687862cad3a7",
+  "timestamp": "2026-04-15T13:48:22.047Z",
+  "sessionId": "4e68c636-716a-4da7-bd7d-f8a0450321a2",
+  "version": "2.1.96"
+}
+```
+
+集計スクリプトがこのエントリから抽出する値は以下の通りです。
+
+| 抽出項目 | JSON パス | 値 |
+|---------|-----------|---:|
+| requestId（グルーピングキー） | `requestId` | `req_011Ca5fLwXupnZAzJVrsbPBF` |
+| input_tokens | `message.usage.input_tokens` | 6 |
+| cache_creation_input_tokens | `message.usage.cache_creation_input_tokens` | 9,673 |
+| cache_read_input_tokens | `message.usage.cache_read_input_tokens` | 16,302 |
+| output_tokens | `message.usage.output_tokens` | 129 |
+
+なお、`usage` 内の `server_tool_use`、`cache_creation`（ephemeral の内訳）、`service_tier` などのフィールドは集計では使用していません。
+
+### JSONL からのトークン数集計手順
+
+#### ステップ 1: 集計対象ファイルの特定
+
+集計対象は以下の JSONL ファイルです。
+
+```
+~/.claude/projects/-Users-yuusuke-kawatsu-src-claude-code-doc-verify/<session-id>.jsonl     ← メインセッション
+~/.claude/projects/-Users-yuusuke-kawatsu-src-claude-code-doc-verify/<session-id>/subagents/*.jsonl  ← サブエージェント（存在する場合）
+```
+
+全計測（第 2 回〜第 4 回）で同一のセッション ID `4e68c636-716a-4da7-bd7d-f8a0450321a2` を使用しました（`--continue` や `/compact` で継続したため）。
+
+#### ステップ 2: エントリのフィルタリング
+
+JSONL ファイルの各行（1 行 = 1 JSON エントリ）に対して、以下の条件を**すべて**満たすエントリだけを集計対象とします。
+
+1. **`type` が `"assistant"` である**: `usage` フィールドは API レスポンスに付属するため、`type: "assistant"` のエントリにのみ存在します。`type: "user"` や `type: "system"` には `usage` がないため除外します
+2. **`message.usage` が存在する**: `type: "assistant"` でも `usage` が欠落しているエントリがあれば除外します
+3. **`timestamp` が計測ウィンドウ内である**: `window_start <= timestamp < window_end` の範囲にあるエントリのみ対象とします。ウィンドウは各計測回で異なります:
+   - 第 2 回: `2026-04-16T10:00:00` 〜 `2026-04-16T15:00:00` UTC
+   - 第 3 回: `2026-04-17T00:00:00` 〜 `2026-04-17T05:00:00` UTC
+   - 第 4 回: `2026-04-17T05:00:00` 〜 `2026-04-17T10:00:00` UTC
+4. **`requestId` が存在する**: `requestId` が空や未定義のエントリは除外します
+
+#### ステップ 3: `requestId` による重複排除とトークン数の抽出
+
+フィルタを通過したエントリを `requestId` でグルーピングします。**1 つの `requestId` = 1 回の API 呼び出し**です。
+
+同一 `requestId` のエントリが複数存在する理由は 2 つあります。
+
+1. **ストリーミングチャンク**: Extended Thinking モデルでは、1 回の API レスポンスが `thinking` ブロックと `text` ブロックに分かれ、それぞれ別の JSONL エントリとして記録されます
+2. **サブエージェント JSONL との重複**: サブエージェントのエントリはメイン JSONL とサブエージェント JSONL の両方に同一 `requestId` で記録されます
+
+各 `requestId` に対して、以下のようにトークン数を抽出します。
+
+| フィールド | 抽出方法 | 理由 |
+|-----------|---------|------|
+| `input_tokens` | 同一 `requestId` 内の **最大値（MAX）** を取る | ほぼ全件で同一値だが、MAX で統一することで安全に処理 |
+| `cache_creation_input_tokens` | 同上 | ストリーミング途中のチャンクで `0` が記録され、最終チャンクのみ正しい値を持つケースが 792 件中 1 件確認されたため |
+| `cache_read_input_tokens` | 同上 | `input_tokens` と同様、MAX で統一 |
+| `output_tokens` | 同上 | ストリーミングチャンクの `output_tokens` は増分ではなく**累積値**のため。途中チャンクは生成途中のスナップショットであり、最終チャンクの値が完成した出力トークン数 |
+
+#### ステップ 4: 集計
+
+すべてのユニークな `requestId` に対して、ステップ 3 で抽出した値を合算します。
+
+- **API 呼出数** = ユニークな `requestId` の数
+- **`input`** = 全 `requestId` の `input_tokens` の合計
+- **`cache_creation`** = 全 `requestId` の `cache_creation_input_tokens` の合計
+- **`cache_read`** = 全 `requestId` の `cache_read_input_tokens` の合計
+- **`output`** = 全 `requestId` の `output_tokens`（MAX 値）の合計
+
+これが計測テーブルの 1 行分のデータになります。
+
+---
+
+## 未解決: JSONL の最終ストリーミングチャンク欠落問題
+
+### 発見の経緯
+
+回帰分析の結果、out/cc の比率が API 価格（2.5）に対して約 4〜5 倍（11.4）に推定されました。この乖離の原因を追究する過程で、JSONL の `output_tokens` 記録に欠落があることを発見しました。
+
+### 問題の概要
+
+Claude Code の JSONL には、同一 `requestId` のストリーミングチャンクが複数エントリとして記録されます。通常、最終チャンク（`stop_reason` が `end_turn` や `tool_use`）に完全な `output_tokens` が記録されますが、**最終チャンクが JSONL に書き込まれないケースが存在します**。
+
+この場合、途中チャンク（`stop_reason=null`）の `output_tokens` しか残らず、thinking トークンを含まない不完全な値（多くの場合 `8`）が MAX 値として採用されてしまいます。
+
+### 実験による確認
+
+Claude Code に thinking を伴う短い回答（数値のみ）を繰り返し生成させ、JSONL の記録を確認しました。
+
+| 回答 | end_turn エントリ | output_tokens (MAX) | 備考 |
+|------|:-:|---:|------|
+| 東京 | **あり** | **58** | thinking 52 + text 6 程度 |
+| 1060 | なし | **8** | 最終チャンク欠落 |
+| 1593 | **あり** | **457** | thinking 453 + text 4 程度 |
+| 80189 | なし | **8** | 最終チャンク欠落 |
+| 4227 | **あり** | **398** | thinking 394 + text 4 程度 |
+| 13887 | なし | **8** | 最終チャンク欠落 |
+| 14697 | **あり** | **99** | thinking 95 + text 4 程度 |
+| 19580 | **あり** | **216** | thinking 212 + text 4 程度 |
+| 47393 | **あり** | **861** | thinking 857 + text 4 程度 |
+
+9 回中 3 回（33%）で最終チャンクが欠落しました。欠落するかどうかの法則性は不明です。
+
+### 欠落の構造
+
+正常なケース（「1593」の応答）:
+
+```
+line 528: type=assistant  ct=[thinking]  stop=null      output_tokens=8
+line 529: type=assistant  ct=[text]      stop=end_turn  output_tokens=457  ← 最終チャンク
+line 530: type=system     subtype=stop_hook_summary
+```
+
+欠落するケース（「80189」の応答）:
+
+```
+line 539: type=assistant  ct=[thinking]  stop=null      output_tokens=8
+line 540: type=assistant  ct=[text]      stop=null      output_tokens=8   ← stop=null のまま
+line 541: type=system     subtype=stop_hook_summary                       ← ターン自体は完了
+```
+
+どちらもターンは正常に完了（`stop_hook_summary` が記録される）していますが、欠落するケースでは `stop_reason=end_turn` を持つ最終 assistant エントリが書き込まれません。
+
+### thinking トークンと output_tokens の関係
+
+Extended Thinking の公式ドキュメントには以下の記載があります。
+
+> You're charged for the full thinking tokens generated by the original request, not the summary tokens.
+> The billed output token count will not match the count of tokens you see in the response.
+
+実験でも、thinking ありの「東京」（`output_tokens=58`）と thinking なしの「東京」（`output_tokens=6`）を比較し、**thinking トークンが `output_tokens` に含まれている**ことを確認しました。また、JSONL に記録される thinking 本文は空文字列（`display: "omitted"` モード）ですが、`output_tokens` にはフル思考トークン分が計上されています。
+
+ただし、上記は**最終チャンクが正常に記録された場合**の話です。欠落した場合、途中チャンクの `output_tokens=8` には thinking 分が含まれておらず、大幅な過小計上になります。
+
+### 計測データへの影響
+
+この欠落が計測セッション（S1〜S47）でも同じ頻度（約 33%）で発生していた場合、`output` の合計値が過小計上され、回帰分析の out/cc が API 価格比に対して過大に推定された可能性があります。
+
+### 今後の調査項目
+
+1. **計測セッションでの欠落率の定量化**: 計測セッションの JSONL で、`stop_reason` が `null` のまま終わっている `requestId`（= 最終チャンクが欠落している）の割合を調べる
+2. **欠落した `output_tokens` の復元可能性**: 最終チャンクがなくても、API 側のログや `/status` の usage(%) から正しい `output_tokens` を逆算できるか検討する
+3. **欠落の発生条件の特定**: thinking + 短いテキスト応答（tool_use なし）で発生しやすい傾向があるが、法則性を特定するにはサンプルが不足
+4. **out/cc 比率の再推定**: 欠落を補正した場合の回帰分析結果がどう変わるか
